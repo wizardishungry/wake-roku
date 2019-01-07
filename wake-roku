@@ -1,0 +1,75 @@
+#!/usr/bin/env ruby
+require 'net/http'
+
+def can_connect
+  #Net::HTTP.get(URI.parse($ROKU))
+
+  uri = URI.parse($ROKU)
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.open_timeout = 10 # in seconds
+  http.read_timeout = 10 # in seconds
+  request = Net::HTTP::Get.new(uri.request_uri)
+  begin
+    response = http.request(request)
+    return http
+  rescue => e  
+    puts "Cached version not working #{e.message}"
+    return false
+  end
+end
+
+def get_url
+  path = "#{ENV['HOME']}/.roku"
+  if File.readable? path 
+    $ROKU = File.read(path).chomp
+    if http = can_connect
+      return http
+    else
+      puts "cached roku url #{$ROKU} not working"
+    end
+  end
+  $ROKU=`gssdp-discover -r 1 -n 10 -t roku:ecp | grep http:// | head -n 1 | sed 's/  Location: //'`.chomp
+  puts "@"+$ROKU+"@"
+  abort "Can't find roku " unless http = can_connect
+  File.open(path, 'w') { |file| file.write($ROKU) }
+  puts "discoverted roku at #{$ROKU}"
+  return http
+end
+
+$http = get_url
+
+def send_key(key)
+  puts "send_key #{key}"
+  request = Net::HTTP::Post.new("/keypress/#{key}")
+  response = $http.request(request)
+  puts response
+response
+end
+
+def await_power_on
+  puts "waiting for power on"
+  5.times do  |i|
+    puts "."
+    request = Net::HTTP::Get.new("/query/device-info")
+    response = $http.request(request)
+    return if response.body.to_s =~ /PowerOn/
+    sleep i*(1+i)
+  end
+  abort "Never Powered On!"
+end
+
+def input_matches(app)
+  request = Net::HTTP::Get.new("/query/active-app")
+  response = $http.request(request)
+  return response.body.to_s =~ /#{app}/
+end
+
+
+send_key "PowerOn"
+await_power_on
+until input_matches "tvinput.hdmi2" do 
+  send_key "InputHDMI2"
+  sleep 3
+end
+#send_key "PowerOff"
+
